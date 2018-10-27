@@ -13,3 +13,4 @@ Lab Submission
 
 Instructions for labs (including how to submit answers) are [here](https://github.com/MIT-DB-Class/course-info-2018)
 
+https://sites.google.com/site/cs186fall2013/homeworks
