@@ -1,5 +1,6 @@
 package simpledb;
 
+import java.awt.RenderingHints;
 import java.io.*;
 import java.util.*;
 
@@ -14,7 +15,9 @@ import java.util.*;
  * @author Sam Madden
  */
 public class HeapFile implements DbFile {
-
+	
+	private File file;
+	private TupleDesc td;
     /**
      * Constructs a heap file backed by the specified file.
      * 
@@ -23,7 +26,8 @@ public class HeapFile implements DbFile {
      *            file.
      */
     public HeapFile(File f, TupleDesc td) {
-        // some code goes here
+    	this.file = f;
+        this.td = td;
     }
 
     /**
@@ -32,8 +36,7 @@ public class HeapFile implements DbFile {
      * @return the File backing this HeapFile on disk.
      */
     public File getFile() {
-        // some code goes here
-        return null;
+        return this.file;
     }
 
     /**
@@ -46,8 +49,7 @@ public class HeapFile implements DbFile {
      * @return an ID uniquely identifying this HeapFile.
      */
     public int getId() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return this.file.getAbsoluteFile().hashCode();
     }
 
     /**
@@ -56,14 +58,26 @@ public class HeapFile implements DbFile {
      * @return TupleDesc of this DbFile.
      */
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return this.td;
     }
 
     // see DbFile.java for javadocs
     public Page readPage(PageId pid) {
-        // some code goes here
-        return null;
+    	int pageSize = BufferPool.getPageSize();
+    	byte[] data = new byte[pageSize];
+    	Page page = null;
+    	try {
+    		RandomAccessFile raf = new RandomAccessFile(this.file, "r");
+    		int offset = pid.getPageNumber() * pageSize;
+    		raf.seek(offset);
+    		raf.read(data, 0, pageSize);
+    		page = new HeapPage((HeapPageId)pid, data);
+    		raf.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+			return null;
+		}
+        return page;
     }
 
     // see DbFile.java for javadocs
@@ -76,8 +90,7 @@ public class HeapFile implements DbFile {
      * Returns the number of pages in this HeapFile.
      */
     public int numPages() {
-        // some code goes here
-        return 0;
+    	return (int)(this.file.length() / BufferPool.getPageSize());
     }
 
     // see DbFile.java for javadocs
@@ -98,9 +111,74 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public DbFileIterator iterator(TransactionId tid) {
-        // some code goes here
-        return null;
+    	return new HeapFileIterator(tid);	
     }
+    
+    private class HeapFileIterator implements DbFileIterator {
+    	private int pageNo;
+    	private Iterator<Tuple> tuplesInPage;
+    	private TransactionId tid;
+    	
+        public HeapFileIterator(TransactionId tid) {
+            this.tid = tid;
+        }
+        
+    	public Iterator<Tuple> getTuplesInPage(HeapPageId pid) throws TransactionAbortedException, DbException {
+    		HeapPage page = (HeapPage) Database.getBufferPool().getPage(this.tid, pid, Permissions.READ_ONLY);
+            return page.iterator();
+        }
+    	
+    	@Override
+		public void open() throws DbException, TransactionAbortedException{
+    		pageNo = 0;
+    		HeapPageId pid = new HeapPageId(getId(), pageNo);
+			tuplesInPage = getTuplesInPage(pid);
+		}
+    	
+    	@Override
+        public boolean hasNext() throws DbException, TransactionAbortedException {
+    		// The iterator is closed
+    		if (tuplesInPage == null) {
+    			return false;
+            }
+    		
+    		// Find next tuple in this page.
+    		if (tuplesInPage.hasNext()) {    			
+                return true;
+            }
+    		
+    		// Move to next page.
+            if (pageNo < numPages() - 1) {
+            	pageNo++;
+                HeapPageId pid = new HeapPageId(getId(), pageNo);
+                tuplesInPage = getTuplesInPage(pid);
+                return tuplesInPage.hasNext();
+            } else {
+            	return false;
+            }
+    	}
+    	
+    	@Override
+        public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
+            if (tuplesInPage != null) {
+            	return tuplesInPage.next();                
+            }else {
+            	throw new NoSuchElementException();
+            }            
+        }
+    	
+        @Override
+        public void rewind() throws DbException, TransactionAbortedException {
+            open();
+        }
+
+        @Override
+        public void close() {
+        	pageNo = 0;
+            tuplesInPage = null;
+        }
+    }
+    
 
 }
 

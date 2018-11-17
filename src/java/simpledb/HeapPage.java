@@ -20,6 +20,7 @@ public class HeapPage implements Page {
     final int numSlots;
 
     byte[] oldData;
+    int numEmptySlots;
     private final Byte oldDataLock=new Byte((byte)0);
 
     /**
@@ -42,6 +43,7 @@ public class HeapPage implements Page {
         this.pid = id;
         this.td = Database.getCatalog().getTupleDesc(id.getTableId());
         this.numSlots = getNumTuples();
+        this.numEmptySlots = 0;
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
 
         // allocate and read the header slots of this page
@@ -52,8 +54,12 @@ public class HeapPage implements Page {
         tuples = new Tuple[numSlots];
         try{
             // allocate and read the actual records of this page
-            for (int i=0; i<tuples.length; i++)
-                tuples[i] = readNextTuple(dis,i);
+            for (int i=0; i<tuples.length; i++) {
+            	tuples[i] = readNextTuple(dis,i);
+            	if (!this.isSlotUsed(i)) {
+            		numEmptySlots++;
+        		}
+            }                
         }catch(NoSuchElementException e){
             e.printStackTrace();
         }
@@ -66,9 +72,7 @@ public class HeapPage implements Page {
         @return the number of tuples on this page
     */
     private int getNumTuples() {        
-        // some code goes here
-        return 0;
-
+    	return (BufferPool.getPageSize() * 8) / (td.getSize() * 8 + 1);
     }
 
     /**
@@ -76,10 +80,7 @@ public class HeapPage implements Page {
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
     private int getHeaderSize() {        
-        
-        // some code goes here
-        return 0;
-                 
+    	return (int) Math.ceil( (double) this.getNumTuples() / 8);                 
     }
     
     /** Return a view of this page before it was modified
@@ -111,8 +112,7 @@ public class HeapPage implements Page {
      * @return the PageId associated with this page.
      */
     public HeapPageId getId() {
-    // some code goes here
-    throw new UnsupportedOperationException("implement this");
+    	return this.pid;
     }
 
     /**
@@ -281,24 +281,33 @@ public class HeapPage implements Page {
      * Returns the number of empty slots on this page.
      */
     public int getNumEmptySlots() {
-        // some code goes here
-        return 0;
+        return numEmptySlots;
     }
 
     /**
      * Returns true if associated slot on this page is filled.
      */
     public boolean isSlotUsed(int i) {
-        // some code goes here
-        return false;
+    	int byteNo = i / 8;
+		int offsetInByte = i % 8;		
+		int bitValue = (this.header[byteNo]) & ((byte) 1 << offsetInByte);        
+		return bitValue != 0;
     }
 
     /**
      * Abstraction to fill or clear a slot on this page.
      */
     private void markSlotUsed(int i, boolean value) {
-        // some code goes here
-        // not necessary for lab1
+    	int byteNo = i / 8;
+		int offsetInByte = i % 8;
+		int bitValue = (this.header[byteNo]) & ((byte) 1 << offsetInByte); 
+		if (bitValue == 0 && value) {
+			numEmptySlots++;
+			this.header[byteNo] |= ( (byte) 1 << offsetInByte);
+		} else if(bitValue != 0 && !value){
+			numEmptySlots--;
+			this.header[byteNo] &= ~( (byte) 1 << offsetInByte);
+		}
     }
 
     /**
@@ -306,8 +315,24 @@ public class HeapPage implements Page {
      * (note that this iterator shouldn't return tuples in empty slots!)
      */
     public Iterator<Tuple> iterator() {
-        // some code goes here
-        return null;
+    	return new Iterator<Tuple>() {
+    		private int idx = 0;
+    		private int pos = 0;
+    		private int usedTuplesNum = getNumTuples() - getNumEmptySlots();
+    		@Override
+			public boolean hasNext() {
+				return pos < usedTuplesNum;
+    		}
+    		@Override
+			public Tuple next() {
+    			if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+    			while(!isSlotUsed(idx)) idx++;
+                pos++;
+                return tuples[idx++];
+    		}    		
+    	};
     }
 
 }
