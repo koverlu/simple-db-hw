@@ -2,6 +2,8 @@ package simpledb;
 
 import java.util.*;
 
+import com.sun.org.apache.bcel.internal.generic.RETURN;
+
 /**
  * The Aggregation operator that computes an aggregate (e.g., sum, avg, max,
  * min). Note that we only support aggregates over a single column, grouped by a
@@ -10,7 +12,14 @@ import java.util.*;
 public class Aggregate extends Operator {
 
     private static final long serialVersionUID = 1L;
-
+    OpIterator m_child;
+    int m_aField;
+    int m_gField;
+    Aggregator.Op m_aop;
+    Aggregator m_aggr;
+    OpIterator m_aggrIter;
+    OpIterator[] m_children;
+    TupleDesc m_td;
     /**
      * Constructor.
      * 
@@ -30,7 +39,28 @@ public class Aggregate extends Operator {
      *            The aggregation operator to use
      */
     public Aggregate(OpIterator child, int afield, int gfield, Aggregator.Op aop) {
-	// some code goes here
+		m_child = child;
+		m_aField = afield;
+		m_gField = gfield;
+		m_aop = aop;
+		m_children = null;
+		
+		// Aggregate type should int here, other types are not supported.
+		if(m_gField != Aggregator.NO_GROUPING) {
+    		Type[] typeAr = {m_child.getTupleDesc().getFieldType(m_gField), Type.INT_TYPE};
+    		String[] NameAr = {groupFieldName(), aggregateFieldName()};
+        	m_td = new TupleDesc(typeAr, NameAr);
+		} else {
+			Type[] typeAr = {Type.INT_TYPE};
+			String[] NameAr = {aggregateFieldName()};
+			m_td = new TupleDesc(typeAr, NameAr);
+		}
+		
+		if(m_child.getTupleDesc().getFieldType(m_aField) == Type.INT_TYPE)
+			m_aggr = new IntegerAggregator(gfield, afield, aop, m_td);
+		else
+			m_aggr = new StringAggregator(gfield, afield, aop, m_td);
+		
     }
 
     /**
@@ -39,8 +69,7 @@ public class Aggregate extends Operator {
      *         {@link simpledb.Aggregator#NO_GROUPING}
      * */
     public int groupField() {
-	// some code goes here
-	return -1;
+    	return m_gField;
     }
 
     /**
@@ -48,17 +77,18 @@ public class Aggregate extends Operator {
      *         of the groupby field in the <b>OUTPUT</b> tuples. If not, return
      *         null;
      * */
-    public String groupFieldName() {
-	// some code goes here
-	return null;
+    public String groupFieldName() {		
+    	if(m_gField != Aggregator.NO_GROUPING)
+    		return m_child.getTupleDesc().getFieldName(m_gField);
+    	else
+    		return null;
     }
 
     /**
      * @return the aggregate field
      * */
     public int aggregateField() {
-	// some code goes here
-	return -1;
+    	return m_aField;
     }
 
     /**
@@ -66,25 +96,30 @@ public class Aggregate extends Operator {
      *         tuples
      * */
     public String aggregateFieldName() {
-	// some code goes here
-	return null;
+    	return m_child.getTupleDesc().getFieldName(m_aField);
     }
 
     /**
      * @return return the aggregate operator
      * */
     public Aggregator.Op aggregateOp() {
-	// some code goes here
-	return null;
+    	return m_aop;
     }
 
     public static String nameOfAggregatorOp(Aggregator.Op aop) {
-	return aop.toString();
+    	return aop.toString();
     }
 
     public void open() throws NoSuchElementException, DbException,
 	    TransactionAbortedException {
-	// some code goes here
+		super.open();
+		m_child.open();
+		// Merge all tuples into group
+    	while(m_child.hasNext()) {
+    		m_aggr.mergeTupleIntoGroup(m_child.next());
+    	}
+    	m_aggrIter = m_aggr.iterator();
+    	m_aggrIter.open();
     }
 
     /**
@@ -95,12 +130,14 @@ public class Aggregate extends Operator {
      * aggregate. Should return null if there are no more tuples.
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
-	// some code goes here
-	return null;
+    	if (m_aggrIter.hasNext())
+    		return m_aggrIter.next();
+    	else
+    		return null;
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
-	// some code goes here
+    	m_aggrIter.rewind();
     }
 
     /**
@@ -115,23 +152,23 @@ public class Aggregate extends Operator {
      * iterator.
      */
     public TupleDesc getTupleDesc() {
-	// some code goes here
-	return null;
+		return m_td;
     }
 
     public void close() {
-	// some code goes here
+    	super.close();
+    	m_child.close();
+    	m_aggrIter.close();
     }
 
     @Override
     public OpIterator[] getChildren() {
-	// some code goes here
-	return null;
+    	return m_children;
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
-	// some code goes here
+    	m_children = children;
     }
     
 }

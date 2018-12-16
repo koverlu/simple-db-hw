@@ -26,6 +26,7 @@ public class BufferPool {
     constructor instead. */
     public static final int DEFAULT_PAGES = 50;
     private ConcurrentHashMap<PageId, Page> pageMap;
+    private ConcurrentHashMap<PageId, Integer> lruCache;
     private int maxPageNum;
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -33,8 +34,9 @@ public class BufferPool {
      * @param numPages maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
-    	this.maxPageNum = numPages;
-    	this.pageMap = new ConcurrentHashMap<PageId, Page>();
+    	maxPageNum = numPages;
+    	pageMap = new ConcurrentHashMap<PageId, Page>();
+    	lruCache = new ConcurrentHashMap<PageId, Integer>();
     }
     
     public static int getPageSize() {
@@ -73,10 +75,19 @@ public class BufferPool {
     	{
     		page = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
     		// If there is no space for the new page, evict the page for spaces.
-    		if (this.pageMap.size() == this.maxPageNum) {
+    		if (pageMap.size() == maxPageNum) {
     			evictPage();
 			}
-    		this.pageMap.put(pid, page);
+    		pageMap.put(pid, page);
+    		lruCache.put(pid, 1);
+    	} else {
+            // LRU Cache update
+            for(PageId cpid: lruCache.keySet())
+            {
+                int times = lruCache.get(cpid); 
+                lruCache.replace(cpid, times + 1);
+            }
+            lruCache.replace(pid, 1);
     	}
         return page;
     }
@@ -142,8 +153,8 @@ public class BufferPool {
      */
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+    	// TODO: consider locks
+    	Database.getCatalog().getDatabaseFile(tableId).insertTuple(tid, t);
     }
 
     /**
@@ -161,8 +172,8 @@ public class BufferPool {
      */
     public  void deleteTuple(TransactionId tid, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+    	// TODO: consider locks
+        ((HeapPage) getPage(tid, t.getRecordId().getPageId(), null)).deleteTuple(t);
     }
 
     /**
@@ -171,8 +182,14 @@ public class BufferPool {
      *     break simpledb if running in NO STEAL mode.
      */
     public synchronized void flushAllPages() throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        for(PageId pid:this.pageMap.keySet())
+        {
+            Page page = this.pageMap.get(pid);
+            if (page.isDirty() != null)
+            {
+                this.flushPage(pid);
+            }
+        }
 
     }
 
@@ -194,8 +211,17 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized  void flushPage(PageId pid) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        DbFile df = Database.getCatalog().getDatabaseFile(pid.getTableId());
+        Page to_be_written = pageMap.get(pid);
+        if ( to_be_written == null)
+        {
+            return;
+        }
+        else
+        {
+            df.writePage(to_be_written);
+            to_be_written.markDirty(false, null);
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -210,8 +236,39 @@ public class BufferPool {
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
     private synchronized  void evictPage() throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        PageId temppid = null;
+        int tempmax = 1;
+        for(PageId pid: this.lruCache.keySet())
+        {
+            int v = this.lruCache.get(pid);
+            if(v >= tempmax)
+            {
+                temppid = pid;
+                tempmax = v;
+            }
+        }
+        
+        if (temppid == null)
+        {
+            throw new DbException("Should exist victim page!\n");
+        }
+        else
+        {
+//            for(PageId pid: this.lruCache.keySet())
+//            {
+//                int times = this.lruCache.get(pid); 
+//                this.lruCache.replace(pid,times+1);
+//            }
+            
+            try {
+            	flushPage(temppid);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+            
+            lruCache.remove(temppid);
+            pageMap.remove(temppid);
+        }
     }
 
 }

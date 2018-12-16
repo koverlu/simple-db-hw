@@ -96,7 +96,7 @@ public class Tuple implements Serializable {
         	sumStr += this.fields.get(i).toString() + '\t';
         }
         if(this.fields.size() > 0)
-        	sumStr += this.fields.get(this.fields.size()).toString();
+        	sumStr += this.fields.get(this.fields.size() - 1).toString();
         return sumStr;
     }
 
